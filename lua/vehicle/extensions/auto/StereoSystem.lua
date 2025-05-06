@@ -566,8 +566,8 @@ end
 
 local function previousTrack(playOnRepeat)
     if electrics.values.stereoSystemOn == 1 and isVehicle then
-        if (os.time() - startedTrackTime > 3 and not paused) or (shuffle and not loopedOnce and trackIndex == 1) or playOnRepeat then
-            systemPlayTrack(cachedTracks[cacheTrackIndex()])
+        if (playDuration >= 3) or (shuffle and not loopedOnce and trackIndex == 1) or playOnRepeat then
+            if not paused or playOnRepeat then
         else
             playDuration = 0
             restartFromBeginning = true
