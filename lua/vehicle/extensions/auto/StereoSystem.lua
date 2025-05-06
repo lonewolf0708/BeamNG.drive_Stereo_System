@@ -672,7 +672,7 @@ local function operator(first, second)
 end
 
 local function toggleShuffleMode()
-    if #trackFiles > 0 and vehicleElectrics.values.ignitionLevel > 2 and not shortedInWater and isVehicle then
+    if #trackFiles > 0 and vehicleElectrics.values.ignitionLevel == 2 or vehicleElectrics.values.ignitionLevel == 1 and not shortedInWater and isVehicle then
         shuffle = not shuffle
         if shuffle then
             loopedOnce = false
