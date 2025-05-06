@@ -146,7 +146,7 @@ local function displayState(notifyDirectoryIssues)
     if isVehicle then
         if shortedInWater then
             gui.message(msgShorted, MSG_DURATION, guiActive)
-        elseif vehicleElectrics.values.ignition ~= true then
+        elseif vehicleElectrics.values.ignitionLevel ~= 2 and vehicleElectrics.values.ignitionLevel ~= 1 then
             gui.message("Stereo: ignition is off", MSG_DURATION, guiActive)
         elseif not notifyDirectoryIssues then
             gui.message('Stereo: system is off', MSG_DURATION, guiActive)
@@ -162,7 +162,7 @@ local function displayState(notifyDirectoryIssues)
 end
 
 local function toggleRepeatMode()
-	if #trackFiles > 0 and vehicleElectrics.values.ignition == true and not shortedInWater and isVehicle then
+	if #trackFiles > 0 and vehicleElectrics.values.ignitionLevel == 2 and not shortedInWater and isVehicle then
         repeatMode = repeatMode + 1
         if repeatMode == 4 then
             repeatMode = 1
@@ -369,13 +369,13 @@ local function loadCacheAndGetFiles(directory)
                 tr.genre = nil
                 tr.albumArtist = nil
                 tr.albumPos = nil
-                tr.checkForLyrics = false
+                tr.checkForLyrics = true
                 tr.version1LayerI = false
-                tr.version1LayerIDisplayed = false
+                tr.version1LayerIDisplayed = true
                 tr.endOfAudio = -1
-                tr.fileSeek = 0
+                tr.fileSeek = -1
                 table.insert(trackFiles, tr)
-                i = i -- + 1
+                i = i + 1
             end
         end
         if #trackFiles <= cacheSize then
@@ -465,7 +465,7 @@ local function killStereoSystem()
 end
 
 local function toggleStereoSystem()
-    if #trackFiles > 0 and vehicleElectrics.values.ignitionLevel > 2 and not shortedInWater and isVehicle then
+    if #trackFiles > 0 and not shortedInWater and isVehicle then
         if electrics.values.stereoSystemOn == 1 then
             killStereoSystem()
             gui.message("Stereo: system is now off", MSG_DURATION, guiActive)
@@ -565,7 +565,7 @@ local function nextTrack()
 end
 
 local function previousTrack(playOnRepeat)
-    if electrics.values.stereoSystemOn == 1 and isVehicle then
+    if electrics.values.stereoSystemOn == 1 and vehicleElectrics.values.ignitionLevel == 2 and not shortedInWater and isVehicle then
         if (playDuration >= 3) or (shuffle and not loopedOnce and trackIndex == 1) or playOnRepeat then
             if not paused or playOnRepeat then
         else
@@ -588,7 +588,7 @@ local function previousTrack(playOnRepeat)
 end
 
 local function playPause(userPlayPaused)
-    if electrics.values.stereoSystemOn == 1 and isVehicle then
+    if electrics.values.stereoSystemOn == 1 and vehicleElectrics.values.ignitionLevel == 2 and not shortedInWater and isVehicle then
         if not paused then
             if userPlayPaused then
                 displayTrack('pausing')
@@ -672,7 +672,7 @@ local function operator(first, second)
 end
 
 local function toggleShuffleMode()
-    if #trackFiles > 0 and vehicleElectrics.values.ignitionLevel == 2 or vehicleElectrics.values.ignitionLevel == 1 and not shortedInWater and isVehicle then
+    if #trackFiles > 0 and vehicleElectrics.values.ignitionLevel == 2 and not shortedInWater and isVehicle then
         shuffle = not shuffle
         if shuffle then
             loopedOnce = false
