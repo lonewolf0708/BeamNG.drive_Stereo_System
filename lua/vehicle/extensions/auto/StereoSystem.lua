@@ -33,7 +33,7 @@ local shuffle
 local delayedPlay = false
 local delayedPlayTime = 0
 local loopedOnce
-local profile = "AudioMusic2D"
+local profile = "AudioMusic3D"
 local shortedInWater
 local shortAtTime = 0
 local engine
@@ -42,7 +42,7 @@ local delayedVolUp = false
 local paused
 local delayedVolUpTime = 0
 local MAX_VOLUME = 16
-local DESKTOP_VOLUME = 6
+local DESKTOP_VOLUME = 1
 local MIN_VOLUME_VALUE = .001575
 local VOLUME_QUANTA = 1
 local volume
@@ -55,7 +55,7 @@ local volumeButtonUp
 local wasOn
 local wasPlaying
 local displayedDetails
-local MSG_DURATION = 5
+local MSG_DURATION = 5 -- In seconds. Adjust the duration threshold as needed
 local initialized = false
 local trackIndex
 local isVehicle
@@ -78,27 +78,28 @@ local displayedRecoveredMessage
 local fileTypes = {}
 fileTypes[".mp3"] = true
 fileTypes[".wav"] = true
+fileTypes[".mkv"] = true
 
 local function luaMod(x, mod)
-	local y = x % mod
-	if y == 0 then
-		y = mod
-	end
-	return y
+    local y = x % mod
+    if y == 0 then
+        y = mod
+    end
+    return y
 end
 
 local function swapElements(arr, i1, i2)
-	local copy = deepcopy(arr[i1])
-	arr[i1] = deepcopy(arr[i2])
-	arr[i2] = deepcopy(copy)
+    local copy = deepcopy(arr[i1])
+    arr[i1] = deepcopy(arr[i2])
+    arr[i2] = deepcopy(copy)
 end
 
 local function cacheTrackIndex()
-	if caching then
-		return luaMod(trackIndex - cachePos + 1, #trackFiles)
-	else
-		return trackIndex
-	end
+    if caching then
+        return luaMod(trackIndex - cachePos + 1, #trackFiles)
+    else
+        return trackIndex
+    end
 end
 
 local function displayTrack(state)
@@ -201,7 +202,7 @@ local function displayDetails()
         if volume >= 1 then
             gui.message(msgVolumeAt .. tostring(volume) .. ' - ' .. tostring(MAX_VOLUME), MSG_DURATION, guiVolume)
         else
-            gui.message(msgVolumeMuted, MSG_DURATION, guiVolume) 
+            gui.message(msgVolumeMuted, MSG_DURATION, guiVolume)
         end
         if shuffle then
             gui.message(msgShuffleOn, MSG_DURATION, guiShuffle)
@@ -275,6 +276,7 @@ local function increaseVolumeButtonUp()
     volumeButtonUp = false
 end
 
+-- TODO: [WOL-1] Fix looping music
 local function getMetaData(fromShuffle)
     if fileIsOpen then
         file:close()
@@ -314,46 +316,46 @@ local function systemPlayTrack(track)
 end
 
 local function setNextDownTime()
-	nextDownTime = os.time()
+    nextDownTime = os.time()
 end
 
 local function setPrevDownTime()
-	prevDownTime = os.time()
+    prevDownTime = os.time()
 end
 
 local function setNextUpTime()
-	if wasHolding then
-		wasHolding = false
-	else
-		nextUpTime = os.time()
-	end
+    if wasHolding then
+        wasHolding = false
+    else
+        nextUpTime = os.time()
+    end
 end
 
 local function setPrevUpTime()
-	if wasHolding2 then
-		wasHolding2 = false
-	else
-		prevUpTime = os.time()
-	end
+    if wasHolding2 then
+        wasHolding2 = false
+    else
+        prevUpTime = os.time()
+    end
 end
 
 local function loadCacheAndGetFiles(directory)
-	trackFiles = {}
+    trackFiles = {}    
     if fileIsOpen then
         file:close()
         fileIsOpen = false
     end
-	if FS:directoryExists(directory) then
-		caching = true
-		dirExists = true
-		local files = FS:findFiles(directory, "*.*", -1, true, false)
+    if FS:directoryExists(directory) then
+        caching = true
+        dirExists = true
+        local files = FS:findFiles(directory, "*.*", -1, true, false)
         local i = 1
-		for _, file in ipairs(files) do
-			local extension = string.lower(string.sub(file, -4))
-			if fileTypes[extension] then
-				local tr = {}
-				tr.file = file
-				tr.index = i
+        for _, file in ipairs(files) do
+            local extension = string.lower(string.sub(file, -4))
+            if fileTypes[extension] then
+                local tr = {}
+                tr.file = file
+                tr.index = i
                 tr.duration = 0
                 tr.gettingMetaData = true
                 tr.calculating = true
@@ -371,32 +373,32 @@ local function loadCacheAndGetFiles(directory)
                 tr.version1LayerI = false
                 tr.version1LayerIDisplayed = false
                 tr.endOfAudio = -1
-                tr.fileSeek = -1
-				table.insert(trackFiles, tr)
-                i = i + 1
-			end
-		end
-		if #trackFiles <= cacheSize then
-			caching = false
-		end
-		if caching then
-			cachePos = #trackFiles + 1 - halfCacheSize
-			for i = 1, cacheSize do
-				local index = luaMod(i - halfCacheSize, #trackFiles)
+                tr.fileSeek = 0
+                table.insert(trackFiles, tr)
+                i = i -- + 1
+            end
+        end
+        if #trackFiles <= cacheSize then
+            caching = false
+        end
+        if caching then
+            cachePos = #trackFiles + 1 - halfCacheSize
+            for i = 1, cacheSize do
+                local index = luaMod(i - halfCacheSize, #trackFiles)
 				cachedTracks[i] = {}
 				cachedTracks[i].sfx = nil
 				cachedTracks[i].name = trackFiles[index].file
-			end
-		else
+            end
+        else
 			for i = 1, #trackFiles, 1 do
 				cachedTracks[i] = {}
 				cachedTracks[i].sfx = nil
 				cachedTracks[i].name = trackFiles[i].file
 			end
-		end
-	else
-		dirExists = false
-	end
+        end
+    else
+        dirExists = false
+    end
 end
 
 local function init()
@@ -451,128 +453,127 @@ local function init()
 end
 
 local function killStereoSystem()
-	electrics.values.stereoSystemOn = 0
-	wasPlaying = false
+    electrics.values.stereoSystemOn = 0
+    wasPlaying = false
     paused = true
     wasOn = false
-	for _, track in ipairs(cachedTracks) do
+    for _, track in ipairs(cachedTracks) do
         obj:cutSFX(track.sfx)
-		obj:deleteSFXSource(track.sfx, true)
-		track.sfx = nil
-	end
+        obj:deleteSFXSource(track.sfx, true)
+        track.sfx = nil
+    end
 end
 
 local function toggleStereoSystem()
-	if #trackFiles > 0 and vehicleElectrics.values.ignition == true and not shortedInWater and isVehicle then
-		if electrics.values.stereoSystemOn == 1 then
-			killStereoSystem()
-			gui.message("Stereo: system is now off", MSG_DURATION, guiActive)
+    if #trackFiles > 0 and vehicleElectrics.values.ignitionLevel > 2 and not shortedInWater and isVehicle then
+        if electrics.values.stereoSystemOn == 1 then
+            killStereoSystem()
+            gui.message("Stereo: system is now off", MSG_DURATION, guiActive)
             displayTrack('stopping')
-		else
-			electrics.values.stereoSystemOn = 1
+        else
+            electrics.values.stereoSystemOn = 1
             wasOn = true
-			delayedPlay = true
+            delayedPlay = true
             displayDetails()
-			for _, track in ipairs(cachedTracks) do
-				track.sfx = obj:createSFXSource(track.name, profile, track.name, speaker)
-			end
-			gui.message("Stereo: system is now on", MSG_DURATION, guiActive)
-		end
-	else
+            for _, track in ipairs(cachedTracks) do
+                track.sfx = obj:createSFXSource(track.name, profile, track.name, speaker)
+            end
+            gui.message("Stereo: system is now on", MSG_DURATION, guiActive)
+        end
+    else
         displayState(true)
-	end
+    end
 end
 
 local function updateCache(incr)
-	if incr == 1 then
-		cachePos = luaMod(cachePos + halfCacheSize, #trackFiles)
-		obj:deleteSFXSource(cachedTracks[1].sfx, true)
-		for i = 1, cacheSize - halfCacheSize do
-			cachedTracks[i] = deepcopy(cachedTracks[i + halfCacheSize])
-		end
-		if shuffleIndex == 2 and shuffle then
-			obj:deleteSFXSource(cachedTracks[cacheTrackIndex()].sfx, true)
+    if incr == 1 then
+        cachePos = luaMod(cachePos + halfCacheSize, #trackFiles)
+        obj:deleteSFXSource(cachedTracks[1].sfx, true)
+        for i = 1, cacheSize - halfCacheSize do
+            cachedTracks[i] = deepcopy(cachedTracks[i + halfCacheSize])
+        end
+        if shuffleIndex == 2 and shuffle then
+            obj:deleteSFXSource(cachedTracks[cacheTrackIndex()].sfx, true)
 			cachedTracks[cacheTrackIndex()].sfx = obj:createSFXSource(trackFiles[trackIndex].file, profile, trackFiles[trackIndex].file, speaker)
-			cachedTracks[cacheTrackIndex()].name = trackFiles[trackIndex].file
-			delayedPlay = true
-		end
-		local index = luaMod(trackIndex + 1, #trackFiles)
-		cachedTracks[3].sfx = obj:createSFXSource(trackFiles[index].file, profile, trackFiles[index].file, speaker)
-		cachedTracks[3].name = trackFiles[index].file
-	elseif incr == -1 then
-		cachePos = luaMod(cachePos - halfCacheSize, #trackFiles)
-		obj:deleteSFXSource(cachedTracks[3].sfx, true)
-		for i = cacheSize, cacheSize - halfCacheSize, -1 do
-			cachedTracks[i] = deepcopy(cachedTracks[i - halfCacheSize])
-		end
-		local index = luaMod(trackIndex - 1, #trackFiles)
-		cachedTracks[1].sfx = obj:createSFXSource(trackFiles[index].file, profile, trackFiles[index].file, speaker)
-		cachedTracks[1].name = trackFiles[index].file
-	end
+            cachedTracks[cacheTrackIndex()].name = trackFiles[trackIndex].file
+            delayedPlay = true
+        end
+        local index = luaMod(trackIndex + 1, #trackFiles)
+        cachedTracks[3].sfx = obj:createSFXSource(trackFiles[index].file, profile, trackFiles[index].file, speaker)
+        cachedTracks[3].name = trackFiles[index].file
+    elseif incr == -1 then
+        cachePos = luaMod(cachePos - halfCacheSize, #trackFiles)
+        obj:deleteSFXSource(cachedTracks[3].sfx, true)
+        for i = cacheSize, cacheSize - halfCacheSize, -1 do
+            cachedTracks[i] = deepcopy(cachedTracks[i - halfCacheSize])
+        end
+        local index = luaMod(trackIndex - 1, #trackFiles)
+        cachedTracks[1].sfx = obj:createSFXSource(trackFiles[index].file, profile, trackFiles[index].file, speaker)
+        cachedTracks[1].name = trackFiles[index].file
+    end
 end
 
 local function nextTrack()
-	if electrics.values.stereoSystemOn == 1 and isVehicle then
-		obj:cutSFX(cachedTracks[cacheTrackIndex()].sfx)
-		local newCachePos = trackIndex
-		trackIndex = luaMod(trackIndex + 1, #trackFiles)
-		local swap = true
-		if trackIndex == #trackFiles and shuffle then
-			loopedOnce = true
-			swap = false
-		end
-		if trackIndex == shuffleIndex and shuffle then
-			if shuffleIndex ~= 1 then
-				shuffleIndex = luaMod(shuffleIndex + 1, #trackFiles)
-			end
-			if swap then
-				local maxIndex = #trackFiles
-				if shuffleIndex < newCachePos then
-					maxIndex = cachePos
-				end
-				local tmpShuffleIndex = shuffleIndex
-				local moreRandom = math.random(1, 2)
-				if moreRandom == 2 then
-					tmpShuffleIndex = math.random(shuffleIndex, maxIndex)
-				end
-				local rIndex = math.random(tmpShuffleIndex, maxIndex)
-				swapElements(trackFiles, rIndex, shuffleIndex)
-			end
-			if shuffleIndex == 1 and swap then
-				shuffleIndex = luaMod(shuffleIndex + 1, #trackFiles)
-			end
-		end
-		if shuffle and not caching and #cachedTracks == cacheSize and trackIndex == 1 then
-			for i = 1, 2 do
-				local rIndex = math.random(1, 2)
-				if rIndex == 1 then
-					swapElements(cachedTracks, i, i + 1)
-					swapElements(trackFiles, i, i + 1)
-				end
-			end
-		end
-		if cacheTrackIndex() == cacheSize and caching then
-			updateCache(1)
-		end
-		if not delayedPlay then
-			systemPlayTrack(cachedTracks[cacheTrackIndex()])
-		end
-	else
+    if electrics.values.stereoSystemOn == 1 and isVehicle then
+        obj:cutSFX(cachedTracks[cacheTrackIndex()].sfx)
+        local newCachePos = trackIndex
+        trackIndex = luaMod(trackIndex + 1, #trackFiles)
+        local swap = true
+        if trackIndex == #trackFiles and shuffle then
+            loopedOnce = true
+            swap = false
+        end
+        if trackIndex == shuffleIndex and shuffle then
+            if shuffleIndex ~= 1 then
+                shuffleIndex = luaMod(shuffleIndex + 1, #trackFiles)
+            end
+            if swap then
+                local maxIndex = #trackFiles
+                if shuffleIndex < newCachePos then
+                    maxIndex = cachePos
+                end
+                local tmpShuffleIndex = shuffleIndex
+                local moreRandom = math.random(1, 2)
+                if moreRandom == 2 then
+                    tmpShuffleIndex = math.random(shuffleIndex, maxIndex)
+                end
+                local rIndex = math.random(tmpShuffleIndex, maxIndex)
+                swapElements(trackFiles, rIndex, shuffleIndex)
+            end
+            if shuffleIndex == 1 and swap then
+                shuffleIndex = luaMod(shuffleIndex + 1, #trackFiles)
+            end
+        end
+        if shuffle and not caching and #cachedTracks == cacheSize and trackIndex == 1 then
+            for i = 1, 2 do
+                local rIndex = math.random(1, 2)
+                if rIndex == 1 then
+                    swapElements(cachedTracks, i, i + 1)
+                    swapElements(trackFiles, i, i + 1)
+                end
+            end
+        end
+        if cacheTrackIndex() == cacheSize and caching then
+            updateCache(1)
+        end
+        if not delayedPlay then
+            systemPlayTrack(cachedTracks[cacheTrackIndex()])
+        end
+    else
         displayState(false)
     end
 end
 
 local function previousTrack(playOnRepeat)
-	if electrics.values.stereoSystemOn == 1 and isVehicle then
-        if (playDuration >= 3) or (shuffle and not loopedOnce and trackIndex == 1) or playOnRepeat then
-            if not paused or playOnRepeat then
-                systemPlayTrack(cachedTracks[cacheTrackIndex()])
-            else
-                playDuration = 0
-                restartFromBeginning = true
-                endOfPlayList = false
-                displayTrack('resetting')
-            end
+    if electrics.values.stereoSystemOn == 1 and isVehicle then
+        if (os.time() - startedTrackTime > 3 and not paused) or (shuffle and not loopedOnce and trackIndex == 1) or playOnRepeat then
+            systemPlayTrack(cachedTracks[cacheTrackIndex()])
+        else
+            playDuration = 0
+            restartFromBeginning = true
+            endOfPlayList = false
+            displayTrack('resetting')
+        end
         else
             obj:cutSFX(cachedTracks[cacheTrackIndex()].sfx)
             trackIndex = luaMod(trackIndex - 1, #trackFiles)
@@ -581,32 +582,32 @@ local function previousTrack(playOnRepeat)
             end
             systemPlayTrack(cachedTracks[cacheTrackIndex()])
         end
-	else
+    else
         displayState(false)
     end
 end
 
 local function playPause(userPlayPaused)
-	if electrics.values.stereoSystemOn == 1 and isVehicle then
+    if electrics.values.stereoSystemOn == 1 and isVehicle then
         if not paused then
             if userPlayPaused then
                 displayTrack('pausing')
                 wasPlaying = false
             end
             paused = true
-			obj:setVolume(cachedTracks[cacheTrackIndex()].sfx, MIN_VOLUME_VALUE)
-			obj:setPitch(cachedTracks[cacheTrackIndex()].sfx, 0)
-		else
+            obj:setVolume(cachedTracks[cacheTrackIndex()].sfx, MIN_VOLUME_VALUE)
+            obj:setPitch(cachedTracks[cacheTrackIndex()].sfx, 0)
+        else
             if restartFromBeginning then
                 systemPlayTrack(cachedTracks[cacheTrackIndex()])
             else
                 obj:setPitch(cachedTracks[cacheTrackIndex()].sfx, 1)
             end
             paused = false
-			delayedVolUp = true
+            delayedVolUp = true
             wasPlaying = true
-            displayTrack('resuming')
-		end
+            displayTrack('resuming playback')
+        end
     else
         displayState(false)
     end
@@ -619,7 +620,7 @@ local function onReset()
                 obj:cutSFX(cached.sfx)
             end
         end
-	end
+    end
     if shortedInWater then
         shortedInWater = false
         displayedRecoveredMessage = true
@@ -663,85 +664,85 @@ local function scanForTracks()
 end
 
 local function operator(first, second)
-	if first.index < second.index then
-		return true
-	else
-		return false
-	end
+    if first.index < second.index then
+        return true
+    else
+        return false
+    end
 end
 
 local function toggleShuffleMode()
-	if #trackFiles > 0 and vehicleElectrics.values.ignition == true and not shortedInWater and isVehicle then
-		shuffle = not shuffle
-		if shuffle then
-			loopedOnce = false
-			gui.message(msgShuffleOn, MSG_DURATION, guiShuffle)
-			local startInd = 1
-			if electrics.values.stereoSystemOn == 1 then
-				if cacheTrackIndex() ~= 1 then
-					obj:deleteSFXSource(cachedTracks[1].sfx, true)
-					cachedTracks[1] = deepcopy(cachedTracks[cacheTrackIndex()])
-					cachedTracks[cacheTrackIndex()].sfx = nil
-					swapElements(trackFiles, 1, trackIndex)
-				end
-				startInd = 2
-			end
-			shuffleIndex = startInd
-			for i = startInd, #cachedTracks do
-				if (i ~= cacheTrackIndex() or electrics.values.stereoSystemOn == 0) and cachedTracks[i].sfx ~= nil then
-					obj:deleteSFXSource(cachedTracks[i].sfx, true)
-				end
-			end
-			for i = startInd, #cachedTracks do
-				local tmpShuffleIndex = shuffleIndex
-				local moreRandom = math.random(1, 2)
-				if moreRandom == 2 then
-					tmpShuffleIndex = math.random(shuffleIndex, #trackFiles)
-				end
-				local rIndex = math.random(tmpShuffleIndex, #trackFiles)
-				if electrics.values.stereoSystemOn == 1 then
-					cachedTracks[i].sfx = obj:createSFXSource(trackFiles[rIndex].file, profile, trackFiles[rIndex].file, speaker)
-				else
-					cachedTracks[i].sfx = nil
-				end
-				cachedTracks[i].name = trackFiles[rIndex].file
-				swapElements(trackFiles, rIndex, shuffleIndex)
-				shuffleIndex = shuffleIndex + 1
-			end
-			if caching then
-				shuffleIndex = 3
-			end
-			trackIndex = 1
-			cachePos = 1
-		else
-			gui.message("Stereo: shuffle mode is off", MSG_DURATION, guiShuffle)
-			for i, track in ipairs(cachedTracks) do
-				if (i ~= cacheTrackIndex() or electrics.values.stereoSystemOn == 0) and track.sfx ~= nil then
-					obj:deleteSFXSource(track.sfx, true)
-				end
-			end
-			local copy = deepcopy(cachedTracks[cacheTrackIndex()])
-			trackIndex = trackFiles[trackIndex].index
-			cachePos = luaMod(trackIndex - halfCacheSize, #trackFiles)
-			cachedTracks[cacheTrackIndex()] = deepcopy(copy)
-			table.sort(trackFiles, operator)
+    if #trackFiles > 0 and vehicleElectrics.values.ignitionLevel > 2 and not shortedInWater and isVehicle then
+        shuffle = not shuffle
+        if shuffle then
+            loopedOnce = false
+            gui.message(msgShuffleOn, MSG_DURATION, guiShuffle)
+            local startInd = 1
+            if electrics.values.stereoSystemOn == 1 then
+                if cacheTrackIndex() ~= 1 then
+                    obj:deleteSFXSource(cachedTracks[1].sfx, true)
+                    cachedTracks[1] = deepcopy(cachedTracks[cacheTrackIndex()])
+                    cachedTracks[cacheTrackIndex()].sfx = nil
+                    swapElements(trackFiles, 1, trackIndex)
+                end
+                startInd = 2
+            end
+            shuffleIndex = startInd
+            for i = startInd, #cachedTracks do
+                if (i ~= cacheTrackIndex() or electrics.values.stereoSystemOn == 0) and cachedTracks[i].sfx ~= nil then
+                    obj:deleteSFXSource(cachedTracks[i].sfx, true)
+                end
+            end
+            for i = startInd, #cachedTracks do
+                local tmpShuffleIndex = shuffleIndex
+                local moreRandom = math.random(1, 2)
+                if moreRandom == 2 then
+                    tmpShuffleIndex = math.random(shuffleIndex, #trackFiles)
+                end
+                local rIndex = math.random(tmpShuffleIndex, #trackFiles)
+                if electrics.values.stereoSystemOn == 1 then
+                    cachedTracks[i].sfx = obj:createSFXSource(trackFiles[rIndex].file, profile, trackFiles[rIndex].file, speaker)
+                else
+                    cachedTracks[i].sfx = nil
+                end
+                cachedTracks[i].name = trackFiles[rIndex].file
+                swapElements(trackFiles, rIndex, shuffleIndex)
+                shuffleIndex = shuffleIndex + 1
+            end
+            if caching then
+                shuffleIndex = 3
+            end
+            trackIndex = 1
+            cachePos = 1
+        else
+            gui.message("Stereo: shuffle mode is off", MSG_DURATION, guiShuffle)
+            for i, track in ipairs(cachedTracks) do
+                if (i ~= cacheTrackIndex() or electrics.values.stereoSystemOn == 0) and track.sfx ~= nil then
+                    obj:deleteSFXSource(track.sfx, true)
+                end
+            end
+            local copy = deepcopy(cachedTracks[cacheTrackIndex()])
+            trackIndex = trackFiles[trackIndex].index
+            cachePos = luaMod(trackIndex - halfCacheSize, #trackFiles)
+            cachedTracks[cacheTrackIndex()] = deepcopy(copy)
+            table.sort(trackFiles, operator)
             for i = 1, #cachedTracks do
-				local index = i
-				if caching then
-					index = luaMod(cachePos + i - 1, #trackFiles)
-				end
-				if i ~= cacheTrackIndex() then
-					if electrics.values.stereoSystemOn == 1 then
-						cachedTracks[i].sfx = obj:createSFXSource(trackFiles[index].file, profile, trackFiles[index].file, speaker)
-					else
-						cachedTracks[i].sfx = nil
-					end
-					cachedTracks[i].name = trackFiles[index].file
-				end
-			end
-		end
+                local index = i
+                if caching then
+                    index = luaMod(cachePos + i - 1, #trackFiles)
+                end
+                if i ~= cacheTrackIndex() then
+                    if electrics.values.stereoSystemOn == 1 then
+                        cachedTracks[i].sfx = obj:createSFXSource(trackFiles[index].file, profile, trackFiles[index].file, speaker)
+                    else
+                        cachedTracks[i].sfx = nil
+                    end
+                    cachedTracks[i].name = trackFiles[index].file
+                end
+            end
+        end
         getMetaData(true)
-	else
+    else
         displayState(true)
 	end
 end
@@ -839,7 +840,7 @@ local function updateGFX(dt)
         if (vehicleElectrics.values.ignition ~= true or shortedInWater) and wasOn then
             displayedDetails = false
         end
-        if (vehicleElectrics.values.ignition ~= true or shortedInWater) and electrics.values.stereoSystemOn == 1 then
+        if (vehicleElectrics.values.ignition == 0 or vehicleElectrics.values.ignition == 3) and wasOn then
             if not paused then
                 playPause(false)
             end
@@ -850,13 +851,13 @@ local function updateGFX(dt)
             if not shortedInWater then
                 gui.message("Stereo: ignition turned off", MSG_DURATION, guiActive)
             end
-        elseif vehicleElectrics.values.ignition == true and not shortedInWater and wasOn and electrics.values.stereoSystemOn == 0 then
+        elseif vehicleElectrics.values.ignition == 1 or vehicleElectrics.values.ignition == 2 and not shortedInWater and wasOn and electrics.values.stereoSystemOn == 0 then
             electrics.values.stereoSystemOn = 1
             if wasPlaying then
                 playPause(false)
             end
             if not displayedRecoveredMessage then
-                gui.message("Stereo: ignition turned on", MSG_DURATION, guiActive)
+            gui.message("Stereo: ignition turned on", MSG_DURATION, guiActive)
             end
             displayDetails()
         end
