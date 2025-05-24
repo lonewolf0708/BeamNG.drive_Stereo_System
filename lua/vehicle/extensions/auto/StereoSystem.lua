@@ -80,6 +80,30 @@ fileTypes[".mp3"] = true
 fileTypes[".wav"] = true
 fileTypes[".mkv"] = true
 
+local function generateSfxName(filePath)
+    if filePath == nil then
+        -- log('StereoSystem: generateSfxName called with nil filePath') -- Optional log
+        return "sfx_stereo_nil_" .. tostring(math.random(1000,9999)) -- Unique name for nil paths
+    end
+    local name = string.lower(filePath)
+    -- Extract what's after the last '/' or ''
+    name = string.match(name, "([^/\]+)$") or name
+    -- Replace sequences of non-alphanumeric chars (excluding dot before extension) with a single underscore
+    name = string.gsub(name, "[^%w%._]+", "_")
+    -- Replace dots that are not part of the extension with underscore
+    name = string.gsub(name, "%.([^%.%/%\]+)$", function(ext) return "_" .. ext end) -- Handles "name.v1.mp3" -> "name_v1_mp3"
+    name = string.gsub(name, "%.", "_ext_") -- Replace final dot with _ext_
+    -- Ensure it doesn't start or end with an underscore (if it does, BeamNG might trim it or error)
+    name = string.gsub(name, "^_+", "")
+    name = string.gsub(name, "_+$", "")
+    
+    if name == "" or name == "_ext_" then -- if filename was empty or just an extension
+        name = "track_" .. tostring(math.random(1000,9999))
+    end
+    
+    return "sfx_stereo_" .. name
+end
+
 local function luaMod(x, mod)
     local y = x % mod
     if y == 0 then
@@ -458,9 +482,11 @@ local function killStereoSystem()
     paused = true
     wasOn = false
     for _, track in ipairs(cachedTracks) do
-        obj:cutSFX(track.sfx)
-        obj:deleteSFXSource(track.sfx, true)
-        track.sfx = nil
+        if track and track.sfx then -- **NEW CHECK**
+            obj:cutSFX(track.sfx)
+            obj:deleteSFXSource(track.sfx, true)
+            track.sfx = nil
+        end
     end
 end
 
@@ -476,7 +502,8 @@ local function toggleStereoSystem()
             delayedPlay = true
             displayDetails()
             for _, track in ipairs(cachedTracks) do
-                track.sfx = obj:createSFXSource(track.name, profile, track.name, speaker)
+                local filePath = track.name -- Assuming track.name holds the actual filepath
+                track.sfx = obj:createSFXSource(generateSfxName(filePath), profile, filePath, speaker)
             end
             gui.message("Stereo: system is now on", MSG_DURATION, guiActive)
         end
@@ -502,8 +529,9 @@ local function updateCache(incr)
             if cachedTracks[cacheTrackIndex()] and cachedTracks[cacheTrackIndex()].sfx then -- Check SFX
                 obj:deleteSFXSource(cachedTracks[cacheTrackIndex()].sfx, true)
             end
-			cachedTracks[cacheTrackIndex()].sfx = obj:createSFXSource(trackFiles[trackIndex].file, profile, trackFiles[trackIndex].file, speaker)
-            cachedTracks[cacheTrackIndex()].name = trackFiles[trackIndex].file
+            local filePathForShuffle = trackFiles[trackIndex].file
+			cachedTracks[cacheTrackIndex()].sfx = obj:createSFXSource(generateSfxName(filePathForShuffle), profile, filePathForShuffle, speaker)
+            cachedTracks[cacheTrackIndex()].name = filePathForShuffle
             delayedPlay = true
         end
         
@@ -513,8 +541,9 @@ local function updateCache(incr)
             cachedTracks[cacheSize] = {}
         end
         if trackFiles[loadIndexInTrackFiles] then -- Ensure track file entry exists
-            cachedTracks[cacheSize].sfx = obj:createSFXSource(trackFiles[loadIndexInTrackFiles].file, profile, trackFiles[loadIndexInTrackFiles].file, speaker)
-            cachedTracks[cacheSize].name = trackFiles[loadIndexInTrackFiles].file
+            local filePath = trackFiles[loadIndexInTrackFiles].file
+            cachedTracks[cacheSize].sfx = obj:createSFXSource(generateSfxName(filePath), profile, filePath, speaker)
+            cachedTracks[cacheSize].name = filePath
         else
             -- log('StereoSystem: Error: trackFiles[loadIndexInTrackFiles] is nil in updateCache(1). loadIndexInTrackFiles: ' .. tostring(loadIndexInTrackFiles)) -- Optional
             cachedTracks[cacheSize].sfx = nil
@@ -537,8 +566,9 @@ local function updateCache(incr)
             cachedTracks[1] = {}
         end
         if trackFiles[loadIndexInTrackFiles] then -- Ensure track file entry exists
-            cachedTracks[1].sfx = obj:createSFXSource(trackFiles[loadIndexInTrackFiles].file, profile, trackFiles[loadIndexInTrackFiles].file, speaker)
-            cachedTracks[1].name = trackFiles[loadIndexInTrackFiles].file
+            local filePath = trackFiles[loadIndexInTrackFiles].file
+            cachedTracks[1].sfx = obj:createSFXSource(generateSfxName(filePath), profile, filePath, speaker)
+            cachedTracks[1].name = filePath
         else
             -- log('StereoSystem: Error: trackFiles[loadIndexInTrackFiles] is nil in updateCache(-1). loadIndexInTrackFiles: ' .. tostring(loadIndexInTrackFiles)) -- Optional
             cachedTracks[1].sfx = nil
@@ -555,7 +585,7 @@ local function nextTrack()
             obj:cutSFX(cachedTracks[outgoingTrackCacheIndex].sfx)
             obj:deleteSFXSource(cachedTracks[outgoingTrackCacheIndex].sfx, true)
             cachedTracks[outgoingTrackCacheIndex].sfx = nil
-            cachedTracks[outgoingTrackCacheIndex].name = nil -- Optional: clear name
+            -- REMOVED: cachedTracks[outgoingTrackCacheIndex].name = nil
         end
 
         -- **MODIFIED:** Preserve cache index for updateCache condition
@@ -614,8 +644,9 @@ local function nextTrack()
             if not cachedTracks[newCurrentTrackCacheIndex].sfx then
                 local trackFileToLoad = trackFiles[trackIndex]
                 -- log('StereoSystem: SFX for new track ' .. trackFileToLoad.file .. ' was nil in nextTrack, creating.') -- Optional for debugging
-                cachedTracks[newCurrentTrackCacheIndex].sfx = obj:createSFXSource(trackFileToLoad.file, profile, trackFileToLoad.file, speaker)
-                cachedTracks[newCurrentTrackCacheIndex].name = trackFileToLoad.file
+                local filePath = trackFileToLoad.file
+                cachedTracks[newCurrentTrackCacheIndex].sfx = obj:createSFXSource(generateSfxName(filePath), profile, filePath, speaker)
+                cachedTracks[newCurrentTrackCacheIndex].name = filePath
             end
         else
             -- log('StereoSystem: Error: newCurrentTrackCacheIndex or trackFiles[trackIndex] is nil in nextTrack after SFX creation block. trackIndex: ' .. tostring(trackIndex) .. ', newCurrentTrackCacheIndex: ' .. tostring(newCurrentTrackCacheIndex)) -- Optional
@@ -651,7 +682,7 @@ local function previousTrack(playOnRepeat)
                 obj:cutSFX(cachedTracks[outgoingTrackCacheIndex].sfx)
                 obj:deleteSFXSource(cachedTracks[outgoingTrackCacheIndex].sfx, true)
                 cachedTracks[outgoingTrackCacheIndex].sfx = nil
-                cachedTracks[outgoingTrackCacheIndex].name = nil -- Optional: clear name
+                -- REMOVED: cachedTracks[outgoingTrackCacheIndex].name = nil
             end
 
             -- **MODIFIED:** Preserve cache index for updateCache condition
@@ -677,8 +708,9 @@ local function previousTrack(playOnRepeat)
                 if not cachedTracks[newCurrentTrackCacheIndex].sfx then
                     local trackFileToLoad = trackFiles[trackIndex]
                     -- log('StereoSystem: SFX for new track ' .. trackFileToLoad.file .. ' was nil in previousTrack, creating.') -- Optional for debugging
-                    cachedTracks[newCurrentTrackCacheIndex].sfx = obj:createSFXSource(trackFileToLoad.file, profile, trackFileToLoad.file, speaker)
-                    cachedTracks[newCurrentTrackCacheIndex].name = trackFileToLoad.file
+                    local filePath = trackFileToLoad.file
+                    cachedTracks[newCurrentTrackCacheIndex].sfx = obj:createSFXSource(generateSfxName(filePath), profile, filePath, speaker)
+                    cachedTracks[newCurrentTrackCacheIndex].name = filePath
                 end
             else
                 -- log('StereoSystem: Error: newCurrentTrackCacheIndex or trackFiles[trackIndex] is nil in previousTrack after SFX creation block. trackIndex: ' .. tostring(trackIndex) .. ', newCurrentTrackCacheIndex: ' .. tostring(newCurrentTrackCacheIndex)) -- Optional
@@ -802,7 +834,10 @@ local function toggleShuffleMode()
             end
             shuffleIndex = startInd
             for i = startInd, #cachedTracks do
-                if (i ~= cacheTrackIndex() or electrics.values.stereoSystemOn == 0) and cachedTracks[i].sfx ~= nil then
+                -- **MODIFIED CHECK**
+                if cachedTracks[i] and -- Ensure cachedTracks[i] itself is not nil
+                   (i ~= cacheTrackIndex() or electrics.values.stereoSystemOn == 0) and 
+                   cachedTracks[i].sfx then -- Check .sfx directly (truthy check, same as ~= nil for non-boolean)
                     obj:deleteSFXSource(cachedTracks[i].sfx, true)
                 end
             end
@@ -813,12 +848,13 @@ local function toggleShuffleMode()
                     tmpShuffleIndex = math.random(shuffleIndex, #trackFiles)
                 end
                 local rIndex = math.random(tmpShuffleIndex, #trackFiles)
+                local filePath = trackFiles[rIndex].file
                 if electrics.values.stereoSystemOn == 1 then
-                    cachedTracks[i].sfx = obj:createSFXSource(trackFiles[rIndex].file, profile, trackFiles[rIndex].file, speaker)
+                    cachedTracks[i].sfx = obj:createSFXSource(generateSfxName(filePath), profile, filePath, speaker)
                 else
                     cachedTracks[i].sfx = nil
                 end
-                cachedTracks[i].name = trackFiles[rIndex].file
+                cachedTracks[i].name = filePath
                 swapElements(trackFiles, rIndex, shuffleIndex)
                 shuffleIndex = shuffleIndex + 1
             end
@@ -830,7 +866,10 @@ local function toggleShuffleMode()
         else
             gui.message("Stereo: shuffle mode is off", MSG_DURATION, guiShuffle)
             for i, track in ipairs(cachedTracks) do
-                if (i ~= cacheTrackIndex() or electrics.values.stereoSystemOn == 0) and track.sfx ~= nil then
+                -- **MODIFIED CHECK**
+                if track and -- Ensure track itself is not nil (already good with ipairs but explicit)
+                   (i ~= cacheTrackIndex() or electrics.values.stereoSystemOn == 0) and 
+                   track.sfx then -- Check .sfx directly
                     obj:deleteSFXSource(track.sfx, true)
                 end
             end
@@ -845,12 +884,13 @@ local function toggleShuffleMode()
                     index = luaMod(cachePos + i - 1, #trackFiles)
                 end
                 if i ~= cacheTrackIndex() then
+                    local filePath = trackFiles[index].file
                     if electrics.values.stereoSystemOn == 1 then
-                        cachedTracks[i].sfx = obj:createSFXSource(trackFiles[index].file, profile, trackFiles[index].file, speaker)
+                        cachedTracks[i].sfx = obj:createSFXSource(generateSfxName(filePath), profile, filePath, speaker)
                     else
                         cachedTracks[i].sfx = nil
                     end
-                    cachedTracks[i].name = trackFiles[index].file
+                    cachedTracks[i].name = filePath
                 end
             end
         end
