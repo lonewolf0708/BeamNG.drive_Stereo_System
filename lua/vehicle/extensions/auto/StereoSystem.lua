@@ -82,26 +82,13 @@ fileTypes[".mkv"] = true
 
 local function generateSfxName(filePath)
     if filePath == nil then
-        -- log('StereoSystem: generateSfxName called with nil filePath') -- Optional log
-        return "sfx_stereo_nil_" .. tostring(math.random(1000,9999)) -- Unique name for nil paths
+        -- Fallback for a nil filePath
+        local randomSuffix = ""
+        if math and math.random then randomSuffix = tostring(math.random(1000,9999)) end
+        return "NIL_FILEPATH_PROVIDED_" .. randomSuffix -- Return a distinct, valid SimObject name
     end
-    local name = string.lower(filePath)
-    -- Extract what's after the last '/' or ''
-    name = string.match(name, "([^/\]+)$") or name
-    -- Replace sequences of non-alphanumeric chars (excluding dot before extension) with a single underscore
-    name = string.gsub(name, "[^%w%._]+", "_")
-    -- Replace dots that are not part of the extension with underscore
-    name = string.gsub(name, "%.([^%.%/%\]+)$", function(ext) return "_" .. ext end) -- Handles "name.v1.mp3" -> "name_v1_mp3"
-    name = string.gsub(name, "%.", "_ext_") -- Replace final dot with _ext_
-    -- Ensure it doesn't start or end with an underscore (if it does, BeamNG might trim it or error)
-    name = string.gsub(name, "^_+", "")
-    name = string.gsub(name, "_+$", "")
-    
-    if name == "" or name == "_ext_" then -- if filename was empty or just an extension
-        name = "track_" .. tostring(math.random(1000,9999))
-    end
-    
-    return "sfx_stereo_" .. name
+    -- For this diagnostic step, return the original filePath directly.
+    return filePath
 end
 
 local function luaMod(x, mod)
