@@ -96,7 +96,7 @@ end
 
 local function cacheTrackIndex()
     if caching then
-        return luaMod(trackIndex - cachePos + 1, #trackFiles)
+        return luaMod(trackIndex - cachePos + 1, cacheSize) -- This line needs to be changed
     else
         return trackIndex
     end
