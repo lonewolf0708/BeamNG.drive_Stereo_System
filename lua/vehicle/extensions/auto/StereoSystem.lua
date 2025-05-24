@@ -488,37 +488,83 @@ end
 local function updateCache(incr)
     if incr == 1 then
         cachePos = luaMod(cachePos + halfCacheSize, #trackFiles)
-        obj:deleteSFXSource(cachedTracks[1].sfx, true)
+        if cachedTracks[1] and cachedTracks[1].sfx then -- Check if sfx exists before deleting
+            obj:deleteSFXSource(cachedTracks[1].sfx, true)
+        end
+        
         for i = 1, cacheSize - halfCacheSize do
             cachedTracks[i] = deepcopy(cachedTracks[i + halfCacheSize])
         end
+        
         if shuffleIndex == 2 and shuffle then
-            obj:deleteSFXSource(cachedTracks[cacheTrackIndex()].sfx, true)
+            -- This shuffle logic should remain as is, assuming it's functional
+            -- for its specific purpose (it handles delayedPlay).
+            if cachedTracks[cacheTrackIndex()] and cachedTracks[cacheTrackIndex()].sfx then -- Check SFX
+                obj:deleteSFXSource(cachedTracks[cacheTrackIndex()].sfx, true)
+            end
 			cachedTracks[cacheTrackIndex()].sfx = obj:createSFXSource(trackFiles[trackIndex].file, profile, trackFiles[trackIndex].file, speaker)
             cachedTracks[cacheTrackIndex()].name = trackFiles[trackIndex].file
             delayedPlay = true
         end
-        local index = luaMod(trackIndex + 1, #trackFiles)
-        cachedTracks[3].sfx = obj:createSFXSource(trackFiles[index].file, profile, trackFiles[index].file, speaker)
-        cachedTracks[3].name = trackFiles[index].file
+        
+        -- **MODIFIED:** Correctly calculate index and load into cachedTracks[cacheSize]
+        local loadIndexInTrackFiles = luaMod(cachePos + cacheSize - 1, #trackFiles)
+        if not cachedTracks[cacheSize] then -- Ensure the table for the cache slot exists
+            cachedTracks[cacheSize] = {}
+        end
+        if trackFiles[loadIndexInTrackFiles] then -- Ensure track file entry exists
+            cachedTracks[cacheSize].sfx = obj:createSFXSource(trackFiles[loadIndexInTrackFiles].file, profile, trackFiles[loadIndexInTrackFiles].file, speaker)
+            cachedTracks[cacheSize].name = trackFiles[loadIndexInTrackFiles].file
+        else
+            -- log('StereoSystem: Error: trackFiles[loadIndexInTrackFiles] is nil in updateCache(1). loadIndexInTrackFiles: ' .. tostring(loadIndexInTrackFiles)) -- Optional
+            cachedTracks[cacheSize].sfx = nil
+            cachedTracks[cacheSize].name = nil
+        end
+
     elseif incr == -1 then
         cachePos = luaMod(cachePos - halfCacheSize, #trackFiles)
-        obj:deleteSFXSource(cachedTracks[3].sfx, true)
-        for i = cacheSize, cacheSize - halfCacheSize, -1 do
+        if cachedTracks[cacheSize] and cachedTracks[cacheSize].sfx then -- Check SFX (use cacheSize for generality)
+            obj:deleteSFXSource(cachedTracks[cacheSize].sfx, true)
+        end
+        
+        for i = cacheSize, halfCacheSize + 1, -1 do -- Corrected loop end condition
             cachedTracks[i] = deepcopy(cachedTracks[i - halfCacheSize])
         end
-        local index = luaMod(trackIndex - 1, #trackFiles)
-        cachedTracks[1].sfx = obj:createSFXSource(trackFiles[index].file, profile, trackFiles[index].file, speaker)
-        cachedTracks[1].name = trackFiles[index].file
+        
+        -- **MODIFIED:** Correctly calculate index and load into cachedTracks[1]
+        local loadIndexInTrackFiles = cachePos -- cachePos is the index in trackFiles for the first item in cache window
+        if not cachedTracks[1] then -- Ensure the table for the cache slot exists
+            cachedTracks[1] = {}
+        end
+        if trackFiles[loadIndexInTrackFiles] then -- Ensure track file entry exists
+            cachedTracks[1].sfx = obj:createSFXSource(trackFiles[loadIndexInTrackFiles].file, profile, trackFiles[loadIndexInTrackFiles].file, speaker)
+            cachedTracks[1].name = trackFiles[loadIndexInTrackFiles].file
+        else
+            -- log('StereoSystem: Error: trackFiles[loadIndexInTrackFiles] is nil in updateCache(-1). loadIndexInTrackFiles: ' .. tostring(loadIndexInTrackFiles)) -- Optional
+            cachedTracks[1].sfx = nil
+            cachedTracks[1].name = nil
+        end
     end
 end
 
 local function nextTrack()
     if electrics.values.stereoSystemOn == 1 and isVehicle then
-        obj:cutSFX(cachedTracks[cacheTrackIndex()].sfx)
-        local newCachePos = trackIndex
+        -- **NEW:** Stop and delete the outgoing track's SFX
+        local outgoingTrackCacheIndex = cacheTrackIndex() -- Uses current trackIndex (before increment)
+        if cachedTracks[outgoingTrackCacheIndex] and cachedTracks[outgoingTrackCacheIndex].sfx then
+            obj:cutSFX(cachedTracks[outgoingTrackCacheIndex].sfx)
+            obj:deleteSFXSource(cachedTracks[outgoingTrackCacheIndex].sfx, true)
+            cachedTracks[outgoingTrackCacheIndex].sfx = nil
+            cachedTracks[outgoingTrackCacheIndex].name = nil -- Optional: clear name
+        end
+
+        -- **MODIFIED:** Preserve cache index for updateCache condition
+        local conditionCacheIndex = outgoingTrackCacheIndex -- Store index before trackIndex changes
+
+        -- Original trackIndex increment and shuffle logic (keep as is)
+        -- The variable 'newCachePos' might be part of this original block; leave it if it is.
         trackIndex = luaMod(trackIndex + 1, #trackFiles)
-        local swap = true
+        local swap = true -- Start of existing shuffle block
         if trackIndex == #trackFiles and shuffle then
             loopedOnce = true
             swap = false
@@ -529,7 +575,7 @@ local function nextTrack()
             end
             if swap then
                 local maxIndex = #trackFiles
-                if shuffleIndex < newCachePos then
+                if shuffleIndex < outgoingTrackCacheIndex then -- **MODIFIED**: use outgoingTrackCacheIndex if newCachePos was a placeholder for it
                     maxIndex = cachePos
                 end
                 local tmpShuffleIndex = shuffleIndex
@@ -552,12 +598,36 @@ local function nextTrack()
                     swapElements(trackFiles, i, i + 1)
                 end
             end
-        end
-        if cacheTrackIndex() == cacheSize and caching then
+        end -- End of existing shuffle block
+
+        -- **MODIFIED:** Call updateCache using the preserved condition index
+        if conditionCacheIndex == cacheSize and caching then
             updateCache(1)
         end
+
+        -- **NEW:** Ensure SFX for the new current track is loaded
+        local newCurrentTrackCacheIndex = cacheTrackIndex() -- Uses new trackIndex
+        if newCurrentTrackCacheIndex and trackFiles[trackIndex] then
+            if not cachedTracks[newCurrentTrackCacheIndex] then
+                cachedTracks[newCurrentTrackCacheIndex] = {}
+            end
+            if not cachedTracks[newCurrentTrackCacheIndex].sfx then
+                local trackFileToLoad = trackFiles[trackIndex]
+                -- log('StereoSystem: SFX for new track ' .. trackFileToLoad.file .. ' was nil in nextTrack, creating.') -- Optional for debugging
+                cachedTracks[newCurrentTrackCacheIndex].sfx = obj:createSFXSource(trackFileToLoad.file, profile, trackFileToLoad.file, speaker)
+                cachedTracks[newCurrentTrackCacheIndex].name = trackFileToLoad.file
+            end
+        else
+            -- log('StereoSystem: Error: newCurrentTrackCacheIndex or trackFiles[trackIndex] is nil in nextTrack after SFX creation block. trackIndex: ' .. tostring(trackIndex) .. ', newCurrentTrackCacheIndex: ' .. tostring(newCurrentTrackCacheIndex)) -- Optional
+        end
+
+        -- Call systemPlayTrack with the new track's cache index
         if not delayedPlay then
-            systemPlayTrack(cachedTracks[cacheTrackIndex()])
+            if cachedTracks[newCurrentTrackCacheIndex] and cachedTracks[newCurrentTrackCacheIndex].sfx then
+                systemPlayTrack(cachedTracks[newCurrentTrackCacheIndex])
+            else
+                -- log('StereoSystem: Error: SFX for trackIndex ' .. tostring(trackIndex) .. ' is nil before systemPlayTrack in nextTrack.') -- Optional
+            end
         end
     else
         displayState(false)
@@ -575,12 +645,55 @@ local function previousTrack(playOnRepeat)
             displayTrack('resetting')
         end
         else
-            obj:cutSFX(cachedTracks[cacheTrackIndex()].sfx)
+            -- **NEW:** Stop and delete the outgoing track's SFX
+            local outgoingTrackCacheIndex = cacheTrackIndex() -- Uses current trackIndex (before decrement)
+            if cachedTracks[outgoingTrackCacheIndex] and cachedTracks[outgoingTrackCacheIndex].sfx then
+                obj:cutSFX(cachedTracks[outgoingTrackCacheIndex].sfx)
+                obj:deleteSFXSource(cachedTracks[outgoingTrackCacheIndex].sfx, true)
+                cachedTracks[outgoingTrackCacheIndex].sfx = nil
+                cachedTracks[outgoingTrackCacheIndex].name = nil -- Optional: clear name
+            end
+
+            -- **MODIFIED:** Preserve cache index for updateCache condition
+            local conditionCacheIndex = outgoingTrackCacheIndex -- Store index before trackIndex changes
+
+            -- Original trackIndex decrement
             trackIndex = luaMod(trackIndex - 1, #trackFiles)
-            if cacheTrackIndex() == 1 and caching then
+
+            -- **MODIFIED:** Call updateCache using the preserved condition index
+            -- The original condition was `if cacheTrackIndex() == 1 and caching then`.
+            -- `cacheTrackIndex()` there would use the *new* `trackIndex`.
+            -- The condition should be based on the *outgoing* track's position.
+            if conditionCacheIndex == 1 and caching then
                 updateCache(-1)
             end
-            systemPlayTrack(cachedTracks[cacheTrackIndex()])
+
+            -- **NEW:** Ensure SFX for the new current track (the previous one) is loaded
+            local newCurrentTrackCacheIndex = cacheTrackIndex() -- Uses new (decremented) trackIndex
+            if newCurrentTrackCacheIndex and trackFiles[trackIndex] then
+                if not cachedTracks[newCurrentTrackCacheIndex] then
+                    cachedTracks[newCurrentTrackCacheIndex] = {}
+                end
+                if not cachedTracks[newCurrentTrackCacheIndex].sfx then
+                    local trackFileToLoad = trackFiles[trackIndex]
+                    -- log('StereoSystem: SFX for new track ' .. trackFileToLoad.file .. ' was nil in previousTrack, creating.') -- Optional for debugging
+                    cachedTracks[newCurrentTrackCacheIndex].sfx = obj:createSFXSource(trackFileToLoad.file, profile, trackFileToLoad.file, speaker)
+                    cachedTracks[newCurrentTrackCacheIndex].name = trackFileToLoad.file
+                end
+            else
+                -- log('StereoSystem: Error: newCurrentTrackCacheIndex or trackFiles[trackIndex] is nil in previousTrack after SFX creation block. trackIndex: ' .. tostring(trackIndex) .. ', newCurrentTrackCacheIndex: ' .. tostring(newCurrentTrackCacheIndex)) -- Optional
+            end
+            
+            -- Call systemPlayTrack with the new track's cache index
+            -- Note: The original function did not have a `not delayedPlay` check here.
+            -- Assuming previousTrack operations are immediate. If delayedPlay could be a factor,
+            -- this part might need similar handling as in nextTrack.
+            -- For now, keep it direct as per original structure of this 'else' block.
+            if cachedTracks[newCurrentTrackCacheIndex] and cachedTracks[newCurrentTrackCacheIndex].sfx then
+                systemPlayTrack(cachedTracks[newCurrentTrackCacheIndex])
+            else
+                -- log('StereoSystem: Error: SFX for trackIndex ' .. tostring(trackIndex) .. ' is nil before systemPlayTrack in previousTrack.') -- Optional
+            end
         end
     else
         displayState(false)
