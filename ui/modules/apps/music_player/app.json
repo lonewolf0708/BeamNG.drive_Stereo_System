@@ -1,0 +1,14 @@
+{
+  "name": "Music Player",
+  "version": "0.2",
+  "author": "AI Assistant & User",
+  "description": "In-game music player UI to control the vehicle's stereo system. Uses AngularJS directive.",
+  "directive": "musicPlayerUi",
+  "domElement": "<music-player-ui></music-player-ui>",
+  "css": {
+    "width": "400px",
+    "height": "280px",
+    "top": "200px",
+    "left": "50px"
+  }
+}
