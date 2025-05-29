@@ -1,20 +1,9 @@
 local M = {}
 
 local speaker
-local msgDirNotExists = "Stereo: the music folder doesn't exist"
-local msgShorted = "Stereo: system shorted"
-local msgEmpty = "Stereo: the music folder is empty"
-local msgVolumeAt = 'Stereo: volume at '
-local msgVolumeMuted = 'Stereo: volume muted'
-local msgShuffleOn = "Stereo: shuffle mode is on"
+-- Removed msgDirNotExists, msgShorted, msgEmpty, msgVolumeAt, msgVolumeMuted, msgShuffleOn
 local tracksFolder = "music"
-local guiActive = "active"
-local guiShuffle = "shuffle"
-local guiRepeat = "repeat_mode"
-local guiFile = "file"
-local guiPlaying = "playing"
-local guiVolume = 'volume'
-local guiTrackCount = "track count"
+-- Removed guiActive, guiShuffle, guiRepeat, guiFile, guiPlaying, guiVolume, guiTrackCount
 local cachedTracks = {}
 local trackFiles = {}
 local shuffleIndex
@@ -55,7 +44,7 @@ local volumeButtonUp
 local wasOn
 local wasPlaying
 local displayedDetails
-local MSG_DURATION = 5
+local MSG_DURATION = 5 -- This might be reused for showUiNotification duration, or removed if not.
 local initialized = false
 local trackIndex
 local isVehicle
@@ -78,6 +67,65 @@ local displayedRecoveredMessage
 local fileTypes = {}
 fileTypes[".mp3"] = true
 fileTypes[".wav"] = true
+
+-- --- START: New UI Update Functions ---
+local function escapeJsString(str)
+    if type(str) ~= "string" then return "" end
+    return str:gsub("'", "\\'"):gsub("\n", "\\n"):gsub("\r", "\\r")
+end
+
+local function updateUiTrackInfo(title, artist, album, currentTrackNum, totalTracksNum)
+    local titleStr = escapeJsString(title or "N/A")
+    local artistStr = escapeJsString(artist or "N/A")
+    local albumStr = escapeJsString(album or "N/A")
+    local trackNum = currentTrackNum or 0
+    local totalTracksCount = totalTracksNum or 0
+    local jsCommand = string.format("if(window.updateTrackDisplay) { window.updateTrackDisplay('%s', '%s', '%s', %d, %d); }",
+                                    titleStr, artistStr, albumStr, trackNum, totalTracksCount)
+    gui.executeJS(jsCommand)
+end
+
+-- Modified to include systemActive
+local function updateUiPlaybackState(isPlayingState, isPausedState, isAtEndState, systemIsActive)
+    local jsCommand = string.format("if(window.setPlaybackStateDisplay) { window.setPlaybackStateDisplay(%s, %s, %s, %s); }",
+                                    tostring(isPlayingState), tostring(isPausedState), tostring(isAtEndState), tostring(systemIsActive))
+    gui.executeJS(jsCommand)
+end
+
+local function updateUiVolume(volumeLevel, maxSystemVolume)
+    local normalizedVolume = 0
+    if maxSystemVolume > 0 and volumeLevel >= MIN_VOLUME_VALUE then -- MIN_VOLUME_VALUE is effectively mute
+        normalizedVolume = volumeLevel / maxSystemVolume
+    end
+    -- Ensure it's between 0 and 1 for the UI slider
+    normalizedVolume = math.max(0, math.min(1, normalizedVolume))
+    local jsCommand = string.format("if(window.setVolumeDisplay) { window.setVolumeDisplay(%.2f, 1.0); }", normalizedVolume) -- maxVolume for UI is always 1.0
+    gui.executeJS(jsCommand)
+end
+
+local function updateUiShuffleMode(isShuffleOnState)
+    local jsCommand = string.format("if(window.setShuffleDisplay) { window.setShuffleDisplay(%s); }", tostring(isShuffleOnState))
+    gui.executeJS(jsCommand)
+end
+
+local function updateUiRepeatMode(repeatModeNum)
+    local modeStr = "off"
+    if repeatModeNum == 2 then modeStr = "playlist"
+    elseif repeatModeNum == 3 then modeStr = "song"
+    end
+    local jsCommand = string.format("if(window.setRepeatDisplay) { window.setRepeatDisplay('%s'); }", modeStr)
+    gui.executeJS(jsCommand)
+end
+
+local function showUiNotification(message, type, duration)
+    local messageStr = escapeJsString(message or "")
+    local typeStr = escapeJsString(type or "info")
+    local durationMs = duration or 3000
+    local jsCommand = string.format("if(window.showNotificationInUi) { window.showNotificationInUi('%s', '%s', %d); }",
+                                    messageStr, typeStr, durationMs)
+    gui.executeJS(jsCommand)
+end
+-- --- END: New UI Update Functions ---
 
 local function luaMod(x, mod)
 	local y = x % mod
@@ -102,59 +150,60 @@ local function cacheTrackIndex()
 end
 
 local function displayTrack(state)
-    local trStr = 'Stereo: '
-    local trNum = 'track ' .. tostring(trackIndex) .. ' of ' .. tostring(#trackFiles)
-    local meta = '\n' .. metaString
-    if state == 'playing' then
-        trStr = trStr .. 'now playing ' .. trNum .. meta
-    elseif state == 'pausing' then
-        trStr = trStr .. trNum .. ' is paused' .. meta
-    elseif state == 'current' then
-        trStr = trStr .. state .. ' ' .. trNum .. meta
-    elseif state == 'stopping' then
-        trStr = trStr .. 'stopped playing ' .. trNum .. meta
-    elseif state == 'resetting' then
-        trStr = trStr .. 'reset ' .. trNum .. ' to beginning' .. meta
-    elseif state == 'resuming' then
-        trStr = trStr .. state .. ' ' .. trNum .. meta
+    -- This function is largely replaced by direct calls to updateUiTrackInfo and updateUiPlaybackState
+    -- However, we still need to update the metaString for internal use if necessary,
+    -- and decide what state to pass to the UI.
+
+    local currentTr = trackFiles[trackIndex]
+    if not currentTr then
+        updateUiTrackInfo("No Track", "N/A", "N/A", 0, #trackFiles)
+        updateUiPlaybackState(false, paused, true, electrics.values.stereoSystemOn == 1 and vehicleElectrics.values.ignition == true and not shortedInWater) -- No track implies at end
+        return
     end
-    gui.message(trStr, MSG_DURATION, guiPlaying)
+
+    buildMetaDataString() -- Ensure metaString is up to date
+
+    local systemIsCurrentlyActive = electrics.values.stereoSystemOn == 1 and vehicleElectrics.values.ignition == true and not shortedInWater
+    local isActuallyPlaying = (state == 'playing' or state == 'resuming') and not paused and systemIsCurrentlyActive
+    updateUiTrackInfo(currentTr.title, currentTr.artist, currentTr.album, trackIndex, #trackFiles)
+    updateUiPlaybackState(isActuallyPlaying, paused, endOfPlayList, systemIsCurrentlyActive)
+
     if state == 'playing' or state == 'resuming' then
-        if trackFiles[trackIndex].version1LayerI then
-            gui.message('Stereo: Warning - ' .. string.sub(trackFiles[trackIndex].file, 8) .. ' contains at least one MPEG-1 Layer I frame and thus might not be supported by FMOD', MSG_DURATION, 'warning')
+        if currentTr.version1LayerI then
+            showUiNotification('Warning - ' .. string.sub(currentTr.file, 8) .. ' contains MPEG-1 Layer I frame, may not be supported.', 'warning', MSG_DURATION * 1000)
         end
-        if trackFiles[trackIndex].duration ~= trackFiles[trackIndex].duration then
-            gui.message('Stereo: Error - could not obtain the duration of ' .. string.sub(trackFiles[trackIndex].file, 8), MSG_DURATION, 'error')
+        if currentTr.duration ~= currentTr.duration then -- Checks for NaN
+            showUiNotification('Error - could not obtain duration of ' .. string.sub(currentTr.file, 8), 'error', MSG_DURATION * 1000)
         end
+    elseif state == 'pausing' then
+         showUiNotification("Track " .. trackIndex .. " paused.", "info", MSG_DURATION * 1000)
+    elseif state == 'stopping' then
+         showUiNotification("Playback stopped.", "info", MSG_DURATION * 1000)
+    -- Other states like 'current', 'resetting' might just update info without specific notification,
+    -- or can have specific notifications if desired.
     end
 end
 
 local function displayRepeatMode()
-    local repeatModeString = ""
-    if repeatMode == 1 then
-        repeatModeString = "Stereo: repeat mode is off"
-    elseif repeatMode == 2 then
-        repeatModeString = "Stereo: repeat mode is playlist"
-    elseif repeatMode == 3 then
-        repeatModeString = "Stereo: repeat mode is song"
-    end
-    gui.message(repeatModeString, MSG_DURATION, guiRepeat)
+    -- Replaced by updateUiRepeatMode(repeatMode)
+    updateUiRepeatMode(repeatMode)
 end
 
 local function displayState(notifyDirectoryIssues)
+    -- This function's messages are now handled by showUiNotification
     if isVehicle then
         if shortedInWater then
-            gui.message(msgShorted, MSG_DURATION, guiActive)
+            showUiNotification("Stereo: system shorted", "error", MSG_DURATION * 1000) -- Type "error" could also set systemActive=false in JS
         elseif vehicleElectrics.values.ignition ~= true then
-            gui.message("Stereo: ignition is off", MSG_DURATION, guiActive)
+            showUiNotification("Stereo: ignition is off", "ignition_off", MSG_DURATION * 1000)
         elseif not notifyDirectoryIssues then
-            gui.message('Stereo: system is off', MSG_DURATION, guiActive)
+            showUiNotification('Stereo: system is off', "system_off", MSG_DURATION * 1000)
         end
         if notifyDirectoryIssues then
             if dirExists and #trackFiles == 0 then
-                gui.message(msgEmpty, MSG_DURATION, guiFile)
+                showUiNotification("Stereo: the music folder is empty", "warning", MSG_DURATION * 1000)
             elseif not dirExists then
-                gui.message(msgDirNotExists, MSG_DURATION, guiFile)
+                showUiNotification("Stereo: the music folder doesn't exist", "error", MSG_DURATION * 1000)
             end
         end
     end
@@ -166,7 +215,12 @@ local function toggleRepeatMode()
         if repeatMode == 4 then
             repeatMode = 1
         end
-        displayRepeatMode()
+        updateUiRepeatMode(repeatMode) -- Updated
+        -- Show notification for the mode change
+        local modeStr = "off"
+        if repeatMode == 2 then modeStr = "playlist"
+        elseif repeatMode == 3 then modeStr = "song" end
+        showUiNotification("Repeat mode: " .. modeStr, "info", MSG_DURATION * 1000)
     else
         displayState(true)
     end
@@ -198,20 +252,20 @@ end
 local function displayDetails()
     if electrics.values.stereoSystemOn == 1 then
         displayedDetails = true
-        if volume >= 1 then
-            gui.message(msgVolumeAt .. tostring(volume) .. ' - ' .. tostring(MAX_VOLUME), MSG_DURATION, guiVolume)
-        else
-            gui.message(msgVolumeMuted, MSG_DURATION, guiVolume) 
-        end
-        if shuffle then
-            gui.message(msgShuffleOn, MSG_DURATION, guiShuffle)
-        end
-        displayRepeatMode()
+        updateUiVolume(volume, MAX_VOLUME) -- Updated
+        updateUiShuffleMode(shuffle)       -- Updated
+        updateUiRepeatMode(repeatMode)     -- Updated
+
         if not delayedPlay then
-            if paused and not endOfPlayList then
-                displayTrack('pausing')
+            local currentTr = trackFiles[trackIndex]
+            if paused and not endOfPlayList and currentTr then
+                updateUiTrackInfo(currentTr.title, currentTr.artist, currentTr.album, trackIndex, #trackFiles)
+                updateUiPlaybackState(false, true, false, true)
+                showUiNotification("Playback paused.", "info", MSG_DURATION*1000)
             elseif endOfPlayList then
-                gui.message("Stereo: reached the end of the playlist", MSG_DURATION, guiPlaying)
+                showUiNotification("Stereo: reached the end of the playlist", "info", MSG_DURATION * 1000)
+                if currentTr then  updateUiTrackInfo(currentTr.title, currentTr.artist, currentTr.album, trackIndex, #trackFiles) end
+                updateUiPlaybackState(false, paused, true, true)
             end
         end
     end
@@ -224,12 +278,12 @@ local function increaseVolume()
         elseif volume < VOLUME_QUANTA then
             volume = VOLUME_QUANTA
         end
-        if not paused then
+        if not paused and cachedTracks[cacheTrackIndex()] and cachedTracks[cacheTrackIndex()].sfx then
             obj:setVolume(cachedTracks[cacheTrackIndex()].sfx, volume)
         end
-        gui.message(msgVolumeAt .. tostring(volume) .. ' - ' .. tostring(MAX_VOLUME), MSG_DURATION, guiVolume)
+        updateUiVolume(volume, MAX_VOLUME) -- Updated
     else
-        displayState(false)
+        displayState(false) -- This will show a notification like "system off"
     end
 end
 
@@ -238,20 +292,40 @@ local function decreaseVolume()
         if volume > VOLUME_QUANTA then
             volume = volume - VOLUME_QUANTA
         elseif volume == VOLUME_QUANTA then
-            volume = MIN_VOLUME_VALUE
+            volume = MIN_VOLUME_VALUE -- Effectively mute
         end
-        if not paused then
+        if not paused and cachedTracks[cacheTrackIndex()] and cachedTracks[cacheTrackIndex()].sfx then
             obj:setVolume(cachedTracks[cacheTrackIndex()].sfx, volume)
         end
-        if volume >= 1 then
-            gui.message(msgVolumeAt .. tostring(volume) .. ' - ' .. tostring(MAX_VOLUME), MSG_DURATION, guiVolume)
-        else
-            gui.message(msgVolumeMuted, MSG_DURATION, guiVolume)
-        end
+        updateUiVolume(volume, MAX_VOLUME) -- Updated
     else
-        displayState(false)
+        displayState(false) -- This will show a notification like "system off"
     end
 end
+
+-- New function to set volume from UI (0.0 to 1.0)
+function M.setVolume(uiVolume)
+    if electrics.values.stereoSystemOn == 1 and isVehicle then
+        -- Scale UI volume (0-1) to system volume (MIN_VOLUME_VALUE - MAX_VOLUME)
+        if uiVolume <= 0.01 then -- Treat very low values as mute
+            volume = MIN_VOLUME_VALUE
+        else
+            volume = uiVolume * MAX_VOLUME
+        end
+        -- Clamp volume to system limits
+        volume = math.max(MIN_VOLUME_VALUE, math.min(MAX_VOLUME, volume))
+
+        if not paused and cachedTracks[cacheTrackIndex()] and cachedTracks[cacheTrackIndex()].sfx then
+            obj:setVolume(cachedTracks[cacheTrackIndex()].sfx, volume)
+        end
+        updateUiVolume(volume, MAX_VOLUME)
+        -- showUiNotification("Volume set to " .. string.format("%.0f", uiVolume * 100) .. "%", "info", 1500)
+    else
+        -- displayState(false) -- Already handled by button checks in UI potentially
+        showUiNotification("Cannot set volume: System is off or not available.", "warning", 2000)
+    end
+end
+
 
 local function decreaseVolumeButtonDown()
     volumeDownTime = os.time()
@@ -292,9 +366,14 @@ local function getMetaData(fromShuffle)
         buildMetaDataString()
         if electrics.values.stereoSystemOn == 1 then
             if fromShuffle then
-                displayTrack('current')
+                -- displayTrack('current') -- This implies just updating info, not starting playback
+                local currentTr = trackFiles[trackIndex]
+                if currentTr then
+                    updateUiTrackInfo(currentTr.title, currentTr.artist, currentTr.album, trackIndex, #trackFiles)
+                    updateUiPlaybackState(not paused, paused, endOfPlayList)
+                end
             elseif not fromShuffle then
-                displayTrack('playing')
+                displayTrack('playing') -- This implies starting playback and updating info
             end
         end
     end
@@ -304,13 +383,19 @@ local function systemPlayTrack(track)
     wasPlaying = true
     endOfPlayList = false
     restartFromBeginning = false
-	obj:setVolume(track.sfx, volume)
-    obj:setPitch(track.sfx, 1)
-	obj:cutSFX(track.sfx)
-    getMetaData(false)
-	obj:playSFX(track.sfx)
-    paused = false
-    playDuration = 0
+    if track and track.sfx then
+        obj:setVolume(track.sfx, volume)
+        obj:setPitch(track.sfx, 1)
+        obj:cutSFX(track.sfx) -- Cut before playing to ensure it starts from beginning
+        getMetaData(false) -- Updates metaString and calls displayTrack('playing') internally
+        obj:playSFX(track.sfx)
+        paused = false
+        playDuration = 0
+        -- displayTrack('playing') is called within getMetaData if conditions are met
+    else
+        showUiNotification("Error: Track data or SFX missing.", "error", 3000)
+        updateUiPlaybackState(false, true, true, false) -- Paused, at end, system not active
+    end
 end
 
 local function setNextDownTime()
@@ -466,17 +551,21 @@ local function toggleStereoSystem()
 	if #trackFiles > 0 and vehicleElectrics.values.ignition == true and not shortedInWater and isVehicle then
 		if electrics.values.stereoSystemOn == 1 then
 			killStereoSystem()
-			gui.message("Stereo: system is now off", MSG_DURATION, guiActive)
-            displayTrack('stopping')
+            showUiNotification("Stereo: system is now off", "system_off", MSG_DURATION * 1000)
+            updateUiPlaybackState(false, true, endOfPlayList, false) -- System off, paused, not active
 		else
 			electrics.values.stereoSystemOn = 1
             wasOn = true
 			delayedPlay = true
-            displayDetails()
-			for _, track in ipairs(cachedTracks) do
-				track.sfx = obj:createSFXSource(track.name, profile, track.name, speaker)
+            -- displayDetails() will be called if needed by subsequent state updates.
+			for _, trackData in ipairs(cachedTracks) do
+                if trackData.name then
+				    trackData.sfx = obj:createSFXSource(trackData.name, profile, trackData.name, speaker)
+                end
 			end
-			gui.message("Stereo: system is now on", MSG_DURATION, guiActive)
+            showUiNotification("Stereo: system is now on", "system_on", MSG_DURATION * 1000)
+            -- Full state update will ensure UI consistency
+            if M.requestFullStateUpdate then M.requestFullStateUpdate() end
 		end
 	else
         displayState(true)
@@ -571,12 +660,18 @@ local function previousTrack(playOnRepeat)
                 playDuration = 0
                 restartFromBeginning = true
                 endOfPlayList = false
-                displayTrack('resetting')
+                -- displayTrack('resetting') -- Notify UI instead
+                local currentTr = trackFiles[trackIndex]
+                if currentTr then updateUiTrackInfo(currentTr.title, currentTr.artist, currentTr.album, trackIndex, #trackFiles) end
+                updateUiPlaybackState(false, true, false, true) -- Not playing, but paused, not at end, system active
+                showUiNotification("Track " ..trackIndex.. " reset to beginning.", "info", MSG_DURATION*1000)
             end
         else
-            obj:cutSFX(cachedTracks[cacheTrackIndex()].sfx)
+            if cachedTracks[cacheTrackIndex()] and cachedTracks[cacheTrackIndex()].sfx then
+                obj:cutSFX(cachedTracks[cacheTrackIndex()].sfx)
+            end
             trackIndex = luaMod(trackIndex - 1, #trackFiles)
-            if cacheTrackIndex() == 1 and caching then
+            if cacheTrackIndex() == 1 and caching then 
                 updateCache(-1)
             end
             systemPlayTrack(cachedTracks[cacheTrackIndex()])
@@ -587,35 +682,53 @@ local function previousTrack(playOnRepeat)
 end
 
 local function playPause(userPlayPaused)
-	if electrics.values.stereoSystemOn == 1 and isVehicle then
-        if not paused then
-            if userPlayPaused then
-                displayTrack('pausing')
-                wasPlaying = false
+	if electrics.values.stereoSystemOn == 1 and vehicleElectrics.values.ignition == true and not shortedInWater and isVehicle then
+        local currentCachedTrack = cachedTracks[cacheTrackIndex()]
+        if not currentCachedTrack or not currentCachedTrack.sfx then
+            showUiNotification("Cannot play/pause: Track data or SFX not loaded.", "error", 3000)
+            updateUiPlaybackState(false, true, true, true) -- Error state: not playing, paused, at end, system assumed active
+            return
+        end
+
+        if not paused then -- Was playing, now pause it
+            if userPlayPaused then 
+                showUiNotification("Playback paused", "info", MSG_DURATION*1000)
             end
+            wasPlaying = false 
             paused = true
-			obj:setVolume(cachedTracks[cacheTrackIndex()].sfx, MIN_VOLUME_VALUE)
-			obj:setPitch(cachedTracks[cacheTrackIndex()].sfx, 0)
-		else
+			obj:setVolume(currentCachedTrack.sfx, MIN_VOLUME_VALUE) 
+			obj:setPitch(currentCachedTrack.sfx, 0) 
+            updateUiPlaybackState(false, true, endOfPlayList, true)
+		else -- Was paused, now play it
             if restartFromBeginning then
-                systemPlayTrack(cachedTracks[cacheTrackIndex()])
+                systemPlayTrack(currentCachedTrack) 
             else
-                obj:setPitch(cachedTracks[cacheTrackIndex()].sfx, 1)
+                obj:setPitch(currentCachedTrack.sfx, 1) 
+                paused = false
+                showUiNotification("Playback resumed", "info", MSG_DURATION*1000)
             end
-            paused = false
-			delayedVolUp = true
-            wasPlaying = true
-            displayTrack('resuming')
+			delayedVolUp = true 
+            wasPlaying = true 
+            updateUiPlaybackState(true, false, endOfPlayList, true)
 		end
     else
-        displayState(false)
+        -- Notify UI that action can't be taken due to system/ignition state
+        if vehicleElectrics.values.ignition ~= true then
+            showUiNotification("Cannot play/pause: Ignition is off.", "ignition_off", 2000)
+        elseif electrics.values.stereoSystemOn ~= 1 then
+             showUiNotification("Cannot play/pause: System is off.", "system_off", 2000)
+        elseif shortedInWater then
+             showUiNotification("Cannot play/pause: System shorted.", "error", 2000)
+        else
+            displayState(false) -- Generic "system off" or other issue
+        end
     end
 end
 
 local function onReset()
     if wasOn then
         for i, cached in ipairs(cachedTracks) do
-            if i ~= cacheTrackIndex() or endOfPlayList or restartFromBeginning then
+            if cached.sfx and (i ~= cacheTrackIndex() or endOfPlayList or restartFromBeginning) then
                 obj:cutSFX(cached.sfx)
             end
         end
@@ -623,42 +736,55 @@ local function onReset()
     if shortedInWater then
         shortedInWater = false
         displayedRecoveredMessage = true
-        gui.message("Stereo: system recovered", MSG_DURATION, guiActive)
-        displayDetails()
+        showUiNotification("Stereo: system recovered", "info", MSG_DURATION * 1000)
+        displayDetails() -- Update UI with current state
     end
+    -- Request full UI update on reset to ensure sync
+    if M.requestFullStateUpdate then M.requestFullStateUpdate() end
 end
 
 local function scanForTracks()
     if isVehicle then
         if dirExists then
-            gui.message("Stereo: scan - there were " .. tostring(#trackFiles) .. " track(s) detected in the music folder\nScanning for newly added tracks...", MSG_DURATION, guiTrackCount)
+            showUiNotification("Stereo: scan - there were " .. tostring(#trackFiles) .. " track(s) detected. Scanning for new tracks...", "info", MSG_DURATION * 1000)
         end
         wasPlaying = false
         displayedDetails = false
         if shuffle then
             shuffle = false
-            gui.message("Stereo: shuffle mode reset to off", MSG_DURATION, guiShuffle)
+            updateUiShuffleMode(false)
+            showUiNotification("Stereo: shuffle mode reset to off", "info", MSG_DURATION * 1000)
         end
-        if wasOn then
-            gui.message("Stereo: system reset to off", MSG_DURATION, guiActive)
-            killStereoSystem()
+        if wasOn then -- If system was on, turn it off, then rescan might turn it back on if tracks are found
+            showUiNotification("Stereo: system reset for scan.", "info", MSG_DURATION * 1000)
+            killStereoSystem() -- This also updates UI to off state
         end
         trackIndex = 1
         local oldNum = #trackFiles
-        loadCacheAndGetFiles(tracksFolder)
+        loadCacheAndGetFiles(tracksFolder) -- This function needs to be checked if it also uses gui.message
+
         if dirExists then
             if #trackFiles > oldNum then
                 local dif = #trackFiles - oldNum
-                gui.message("Stereo: scan - found " .. tostring(dif) .. " new track(s) in the music folder\nthere are now " .. tostring(#trackFiles) .. " track(s) in the music folder", MSG_DURATION, guiFile)
+                showUiNotification("Stereo: scan - found " .. dif .. " new track(s). Total: " .. #trackFiles, "success", MSG_DURATION * 1000)
             elseif #trackFiles < oldNum then
                 local dif = oldNum - #trackFiles
-                gui.message("Stereo: scan - " .. tostring(dif) .. " track(s) were removed from the music folder\nthere are now " .. tostring(#trackFiles) .. " track(s) in the music folder", MSG_DURATION, guiFile)
+                showUiNotification("Stereo: scan - " .. dif .. " track(s) removed. Total: " .. #trackFiles, "info", MSG_DURATION * 1000)
             else
-                gui.message("Stereo: scan - no new tracks were added to the music folder", MSG_DURATION, guiFile)
+                showUiNotification("Stereo: scan - no new tracks found. Total: " .. #trackFiles, "info", MSG_DURATION * 1000)
             end
         else
-            gui.message("Stereo: scan - the music folder doesn't exist", MSG_DURATION, guiFile)
+             showUiNotification("Stereo: scan - the music folder doesn't exist", "error", MSG_DURATION * 1000)
         end
+        -- After scan, update track info and playback state (likely stopped)
+        if #trackFiles > 0 then
+            local currentTr = trackFiles[trackIndex]
+            if currentTr then updateUiTrackInfo(currentTr.title, currentTr.artist, currentTr.album, trackIndex, #trackFiles) end
+        else
+            updateUiTrackInfo("No Tracks", "N/A", "N/A", 0, 0)
+        end
+        updateUiPlaybackState(false, true, #trackFiles == 0, electrics.values.stereoSystemOn == 1 and vehicleElectrics.values.ignition == true and not shortedInWater) -- Not playing, paused, atEnd if no tracks
+        updateUiVolume(volume, MAX_VOLUME) -- Send current volume
     end
 end
 
@@ -673,74 +799,94 @@ end
 local function toggleShuffleMode()
 	if #trackFiles > 0 and vehicleElectrics.values.ignition == true and not shortedInWater and isVehicle then
 		shuffle = not shuffle
+        updateUiShuffleMode(shuffle) -- Update UI
 		if shuffle then
 			loopedOnce = false
-			gui.message(msgShuffleOn, MSG_DURATION, guiShuffle)
+            showUiNotification("Stereo: shuffle mode is on", "info", MSG_DURATION * 1000)
 			local startInd = 1
 			if electrics.values.stereoSystemOn == 1 then
-				if cacheTrackIndex() ~= 1 then
-					obj:deleteSFXSource(cachedTracks[1].sfx, true)
-					cachedTracks[1] = deepcopy(cachedTracks[cacheTrackIndex()])
-					cachedTracks[cacheTrackIndex()].sfx = nil
+                local currentCachedIdx = cacheTrackIndex()
+				if currentCachedIdx ~= 1 and cachedTracks[1] and cachedTracks[currentCachedIdx] then -- ensure indices are valid
+					if cachedTracks[1].sfx then obj:deleteSFXSource(cachedTracks[1].sfx, true) end
+					cachedTracks[1] = deepcopy(cachedTracks[currentCachedIdx])
+					cachedTracks[currentCachedIdx].sfx = nil -- Avoid deleting it twice if it was moved
 					swapElements(trackFiles, 1, trackIndex)
 				end
 				startInd = 2
 			end
 			shuffleIndex = startInd
 			for i = startInd, #cachedTracks do
-				if (i ~= cacheTrackIndex() or electrics.values.stereoSystemOn == 0) and cachedTracks[i].sfx ~= nil then
+                if cachedTracks[i] and (i ~= cacheTrackIndex() or electrics.values.stereoSystemOn == 0) and cachedTracks[i].sfx ~= nil then
 					obj:deleteSFXSource(cachedTracks[i].sfx, true)
+                    cachedTracks[i].sfx = nil
 				end
 			end
 			for i = startInd, #cachedTracks do
+                if not trackFiles or #trackFiles == 0 then break end -- Safety break
 				local tmpShuffleIndex = shuffleIndex
+                if tmpShuffleIndex > #trackFiles then tmpShuffleIndex = #trackFiles end -- Bound check
+                if tmpShuffleIndex < 1 then tmpShuffleIndex = 1 end
+
 				local moreRandom = math.random(1, 2)
 				if moreRandom == 2 then
 					tmpShuffleIndex = math.random(shuffleIndex, #trackFiles)
 				end
 				local rIndex = math.random(tmpShuffleIndex, #trackFiles)
+                if not trackFiles[rIndex] then goto continue_loop end -- skip if random index is bad
+
 				if electrics.values.stereoSystemOn == 1 then
-					cachedTracks[i].sfx = obj:createSFXSource(trackFiles[rIndex].file, profile, trackFiles[rIndex].file, speaker)
-				else
+                    if cachedTracks[i] then
+					    cachedTracks[i].sfx = obj:createSFXSource(trackFiles[rIndex].file, profile, trackFiles[rIndex].file, speaker)
+                    end
+				elseif cachedTracks[i] then
 					cachedTracks[i].sfx = nil
 				end
-				cachedTracks[i].name = trackFiles[rIndex].file
+                if cachedTracks[i] then cachedTracks[i].name = trackFiles[rIndex].file end
 				swapElements(trackFiles, rIndex, shuffleIndex)
 				shuffleIndex = shuffleIndex + 1
+                if shuffleIndex > #trackFiles then shuffleIndex = #trackFiles end -- Bound check
+                ::continue_loop::
 			end
 			if caching then
-				shuffleIndex = 3
+				shuffleIndex = 3 -- This might need adjustment based on cacheSize
 			end
 			trackIndex = 1
 			cachePos = 1
 		else
-			gui.message("Stereo: shuffle mode is off", MSG_DURATION, guiShuffle)
-			for i, track in ipairs(cachedTracks) do
-				if (i ~= cacheTrackIndex() or electrics.values.stereoSystemOn == 0) and track.sfx ~= nil then
-					obj:deleteSFXSource(track.sfx, true)
-				end
-			end
-			local copy = deepcopy(cachedTracks[cacheTrackIndex()])
-			trackIndex = trackFiles[trackIndex].index
-			cachePos = luaMod(trackIndex - halfCacheSize, #trackFiles)
-			cachedTracks[cacheTrackIndex()] = deepcopy(copy)
-			table.sort(trackFiles, operator)
-            for i = 1, #cachedTracks do
-				local index = i
-				if caching then
-					index = luaMod(cachePos + i - 1, #trackFiles)
-				end
-				if i ~= cacheTrackIndex() then
-					if electrics.values.stereoSystemOn == 1 then
-						cachedTracks[i].sfx = obj:createSFXSource(trackFiles[index].file, profile, trackFiles[index].file, speaker)
-					else
-						cachedTracks[i].sfx = nil
-					end
-					cachedTracks[i].name = trackFiles[index].file
-				end
-			end
+            showUiNotification("Stereo: shuffle mode is off", "info", MSG_DURATION * 1000)
+            if cachedTracks and cachedTracks[cacheTrackIndex()] then -- Ensure valid before proceeding
+                for i, trackData in ipairs(cachedTracks) do  -- Renamed 'track' to 'trackData'
+                    if trackData and (i ~= cacheTrackIndex() or electrics.values.stereoSystemOn == 0) and trackData.sfx ~= nil then
+                        obj:deleteSFXSource(trackData.sfx, true)
+                        trackData.sfx = nil
+                    end
+                end
+                local copy = deepcopy(cachedTracks[cacheTrackIndex()])
+                if trackFiles[trackIndex] then -- Check if trackFiles[trackIndex] is valid
+                    trackIndex = trackFiles[trackIndex].index
+                else -- Fallback if trackFiles[trackIndex] is nil
+                    trackIndex = 1 -- Or some other default
+                end
+                cachePos = luaMod(trackIndex - halfCacheSize, #trackFiles)
+                if cachedTracks[cacheTrackIndex()] then cachedTracks[cacheTrackIndex()] = deepcopy(copy) end
+                table.sort(trackFiles, operator)
+                for i = 1, #cachedTracks do
+                    local current_idx = i -- Renamed 'index' to 'current_idx'
+                    if caching then
+                        current_idx = luaMod(cachePos + i - 1, #trackFiles)
+                    end
+                    if i ~= cacheTrackIndex() then
+                        if electrics.values.stereoSystemOn == 1 and trackFiles[current_idx] then
+                            if cachedTracks[i] then cachedTracks[i].sfx = obj:createSFXSource(trackFiles[current_idx].file, profile, trackFiles[current_idx].file, speaker) end
+                        elseif cachedTracks[i] then
+                            cachedTracks[i].sfx = nil
+                        end
+                        if cachedTracks[i] and trackFiles[current_idx] then cachedTracks[i].name = trackFiles[current_idx].file end
+                    end
+                end
+            end
 		end
-        getMetaData(true)
+        getMetaData(true) -- This calls displayTrack which updates UI
 	else
         displayState(true)
 	end
@@ -772,15 +918,16 @@ local function checkForEndOfTrack(dt)
         if playDuration >= trackFiles[trackIndex].duration and not trackFiles[trackIndex].calculating then
             paused = true
             wasPlaying = false
-            if repeatMode == 1 then
+            if repeatMode == 1 then -- Off (play through then stop)
                 if trackIndex ~= #trackFiles then
                     nextTrack()
                 else
                     endOfPlayList = true
-                    obj:cutSFX(cachedTracks[cacheTrackIndex()].sfx)
-                    gui.message("Stereo: reached the end of the playlist", MSG_DURATION, guiPlaying)
+                    if cachedTracks[cacheTrackIndex()] and cachedTracks[cacheTrackIndex()].sfx then obj:cutSFX(cachedTracks[cacheTrackIndex()].sfx) end
+                    showUiNotification("Stereo: reached the end of the playlist", "info", MSG_DURATION * 1000)
+                    updateUiPlaybackState(false, true, true, true) -- Not playing, paused, at end, system active
                 end
-            elseif repeatMode == 2 then
+            elseif repeatMode == 2 then -- Playlist
                 nextTrack()
             elseif repeatMode == 3 then
                 previousTrack(true)
@@ -792,39 +939,37 @@ end
 local function getMetaDataFromFile()
     if #trackFiles > 0 and trackFiles[trackIndex].gettingMetaData and fileIsOpen then
         if trackFiles[trackIndex].calculating and (trackFiles[trackIndex].detectedTags or trackFiles[trackIndex].fileType == '.wav') then
-            if trackFiles[trackIndex].version1LayerI and not trackFiles[trackIndex].version1LayerIDisplayed then
-                trackFiles[trackIndex].version1LayerIDisplayed = true
-                gui.message('Stereo: Warning - ' .. string.sub(trackFiles[trackIndex].file, 8) .. ' contains at least one MPEG-1 Layer I frame and thus might not be supported by FMOD', MSG_DURATION, 'warning')
+            if currentTr.version1LayerI and not currentTr.version1LayerIDisplayed then
+                currentTr.version1LayerIDisplayed = true
+                showUiNotification('Warning - ' .. string.sub(currentTr.file, 8) .. ' contains MPEG-1 Layer I frame.', 'warning', MSG_DURATION*1000)
             end
-            if trackFiles[trackIndex].fileType == ".mp3" then
-                mp3Duration.calculateDuration(file, trackFiles[trackIndex])
-            elseif trackFiles[trackIndex].fileType == ".wav" then
-                wavDuration.calculateDuration(file, trackFiles[trackIndex])
+            if currentTr.fileType == ".mp3" then
+                mp3Duration.calculateDuration(file, currentTr)
+            elseif currentTr.fileType == ".wav" then
+                wavDuration.calculateDuration(file, currentTr)
             end
-            if not trackFiles[trackIndex].calculating then
-                trackFiles[trackIndex].gettingMetaData = false
-                if trackFiles[trackIndex].duration ~= trackFiles[trackIndex].duration then
-                    gui.message('Stereo: Error - could not obtain the duration of ' .. string.sub(trackFiles[trackIndex].file, 8), MSG_DURATION, 'error')
+            if not currentTr.calculating then
+                currentTr.gettingMetaData = false
+                if currentTr.duration ~= currentTr.duration then -- NaN check
+                    showUiNotification('Error - could not obtain duration of ' .. string.sub(currentTr.file, 8), 'error', MSG_DURATION*1000)
                 end
                 file:close()
                 fileIsOpen = false
-                if trackFiles[trackIndex].fileType == '.wav' then
-                    trackFiles[trackIndex].detectedTags = true
-                    buildMetaDataString()
+                if currentTr.fileType == '.wav' then -- WAV might not have tags parsed other way
+                    currentTr.detectedTags = true -- Assume true for WAV after duration calc
+                    buildMetaDataString() -- Update metaString
                     if electrics.values.stereoSystemOn == 1 then
-                        displayTrack('playing')
+                        displayTrack('playing') -- Update UI with new info
                     end
                 end
             end
-        elseif trackFiles[trackIndex].fileType == '.mp3' and not trackFiles[trackIndex].detectedTags then
-            while detectedTagsAtBack() do
-            end
-            while detectedTagsAtFront() do
-            end
-            trackFiles[trackIndex].detectedTags = true
-            buildMetaDataString()
+        elseif currentTr.fileType == '.mp3' and not currentTr.detectedTags then
+            while detectedTagsAtBack() do end
+            while detectedTagsAtFront() do end
+            currentTr.detectedTags = true
+            buildMetaDataString() -- Update metaString
             if electrics.values.stereoSystemOn == 1 then
-                displayTrack('playing')
+                displayTrack('playing') -- Update UI
             end
         end
     end
@@ -845,20 +990,22 @@ local function updateGFX(dt)
             end
             electrics.values.stereoSystemOn = 0
             if not shortedInWater then
-                wasPlaying = true
+                wasPlaying = true 
             end
             if not shortedInWater then
-                gui.message("Stereo: ignition turned off", MSG_DURATION, guiActive)
+                showUiNotification("Stereo: ignition turned off", "ignition_off", MSG_DURATION * 1000)
             end
+            updateUiPlaybackState(false, true, endOfPlayList, false) -- Update UI, system not active
         elseif vehicleElectrics.values.ignition == true and not shortedInWater and wasOn and electrics.values.stereoSystemOn == 0 then
-            electrics.values.stereoSystemOn = 1
-            if wasPlaying then
-                playPause(false)
+            electrics.values.stereoSystemOn = 1 
+            if wasPlaying then 
+                playPause(false) 
             end
             if not displayedRecoveredMessage then
-                gui.message("Stereo: ignition turned on", MSG_DURATION, guiActive)
+                showUiNotification("Stereo: ignition turned on", "ignition_on", MSG_DURATION * 1000)
             end
-            displayDetails()
+            -- displayDetails() -- This updates all UI elements; full state update might be better
+            if M.requestFullStateUpdate then M.requestFullStateUpdate() end
         end
         if displayedRecoveredMessage then
             displayedRecoveredMessage = false
@@ -937,7 +1084,8 @@ local function updateGFX(dt)
                 if shortAtTime > 4 then
                     shortAtTime = 0
                     shortedInWater = true
-                    gui.message(msgShorted, MSG_DURATION, guiActive)
+                    showUiNotification("Stereo: system shorted in water!", "error", MSG_DURATION * 1000) 
+                    updateUiPlaybackState(false, true, true, false) -- Not playing, paused, at end, system not active
                 end
             else
                 shortAtTime = 0
@@ -946,20 +1094,70 @@ local function updateGFX(dt)
     end
 end
 
+-- New function to send full state to UI
+function M.requestFullStateUpdate()
+    if not initialized then return end 
+
+    local systemIsActive = isVehicle and electrics.values.stereoSystemOn == 1 and vehicleElectrics.values.ignition == true and not shortedInWater
+    local ignitionIsOn = isVehicle and vehicleElectrics.values.ignition == true
+
+    if not ignitionIsOn then
+        showUiNotification("Stereo: ignition is off", "ignition_off", 100) -- Short notification as state is being set
+    elseif not (isVehicle and electrics.values.stereoSystemOn == 1 and not shortedInWater) then
+         showUiNotification("Stereo: system is off", "system_off", 100)
+    end
+    -- If shorted, that implies system is not active for UI purposes
+    if shortedInWater then
+        systemIsActive = false
+        showUiNotification("Stereo: system shorted", "error", 100)
+    end
+
+
+    if not systemIsActive then
+        local offReason = "System Off"
+        if not ignitionIsOn then offReason = "Ignition Off"
+        elseif shortedInWater then offReason = "System Shorted"
+        elseif not (isVehicle and electrics.values.stereoSystemOn == 1) then offReason = "System Off" -- More specific
+        end
+        updateUiTrackInfo(offReason, "", "", 0, #trackFiles)
+    else
+        local currentTr = trackFiles[trackIndex]
+        if currentTr then
+            buildMetaDataString() 
+            updateUiTrackInfo(currentTr.title, currentTr.artist, currentTr.album, trackIndex, #trackFiles)
+        else
+            updateUiTrackInfo("No Track Loaded", "N/A", "N/A", 0, #trackFiles)
+        end
+    end
+    
+    updateUiPlaybackState(not paused and systemIsActive, paused, endOfPlayList, systemIsActive)
+    updateUiVolume(volume, MAX_VOLUME)
+    updateUiShuffleMode(shuffle)
+    updateUiRepeatMode(repeatMode)
+end
+
+
 M.updateGFX = updateGFX
 M.onReset = onReset
 M.toggleStereoSystem = toggleStereoSystem
-M.setNextDownTime = setNextDownTime
-M.setNextUpTime = setNextUpTime
-M.setPrevDownTime = setPrevDownTime
-M.setPrevUpTime = setPrevUpTime
+M.setNextDownTime = setNextDownTime -- Likely for hardware controls, keep for now
+M.setNextUpTime = setNextUpTime     -- Likely for hardware controls, keep for now
+M.setPrevDownTime = setPrevDownTime   -- Likely for hardware controls, keep for now
+M.setPrevUpTime = setPrevUpTime     -- Likely for hardware controls, keep for now
 M.scanForTracks = scanForTracks
 M.toggleShuffleMode = toggleShuffleMode
 M.playPause = playPause
-M.decreaseVolumeButtonUp = decreaseVolumeButtonUp
-M.decreaseVolumeButtonDown = decreaseVolumeButtonDown
-M.increaseVolumeButtonUp = increaseVolumeButtonUp
-M.increaseVolumeButtonDown = increaseVolumeButtonDown
+M.decreaseVolumeButtonUp = decreaseVolumeButtonUp -- Keep for hardware controls
+M.decreaseVolumeButtonDown = decreaseVolumeButtonDown -- Keep for hardware controls
+M.increaseVolumeButtonUp = increaseVolumeButtonUp -- Keep for hardware controls
+M.increaseVolumeButtonDown = increaseVolumeButtonDown -- Keep for hardware controls
 M.toggleRepeatMode = toggleRepeatMode
+-- Expose nextTrack and previousTrack (were not explicitly in M before)
+M.nextTrack = nextTrack
+M.previousTrack = previousTrack
+-- Expose increaseVolume and decreaseVolume for potential mapping if UI uses buttons instead of slider for steps
+M.increaseVolume = increaseVolume
+M.decreaseVolume = decreaseVolume
+-- M.setVolume is already defined above with the M. prefix
 
 return M
