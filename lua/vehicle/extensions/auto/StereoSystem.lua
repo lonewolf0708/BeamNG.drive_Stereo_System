@@ -1131,7 +1131,7 @@ local function updateGFX(dt)
                 dirExists = true
             end
         end
-        --[[if engine then
+        if engine then
             local isFlooding = engine.canFlood
             for _, n in ipairs(engine.waterDamageNodes) do
                 isFlooding = isFlooding and obj:inWater(n)
@@ -1149,7 +1149,7 @@ local function updateGFX(dt)
             else
                 shortAtTime = 0
             end
-        end]]
+        end
     end
 end
 
